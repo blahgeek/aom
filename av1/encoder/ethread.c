@@ -60,13 +60,14 @@ void av1_encode_tiles_mt(AV1_COMP *cpi) {
 
   // Only run once to create threads and allocate thread data.
   if (cpi->num_workers == 0) {
+    const int alloc_num_workers = 16; // FIXME, blahgeek
     CHECK_MEM_ERROR(cm, cpi->workers,
-                    aom_malloc(num_workers * sizeof(*cpi->workers)));
+                    aom_malloc(alloc_num_workers * sizeof(*cpi->workers)));
 
     CHECK_MEM_ERROR(cm, cpi->tile_thr_data,
-                    aom_calloc(num_workers, sizeof(*cpi->tile_thr_data)));
+                    aom_calloc(alloc_num_workers, sizeof(*cpi->tile_thr_data)));
 
-    for (i = 0; i < num_workers; i++) {
+    for (i = 0; i < alloc_num_workers; i++) {
       AVxWorker *const worker = &cpi->workers[i];
       EncWorkerData *const thread_data = &cpi->tile_thr_data[i];
 
@@ -75,7 +76,7 @@ void av1_encode_tiles_mt(AV1_COMP *cpi) {
 
       thread_data->cpi = cpi;
 
-      if (i < num_workers - 1) {
+      if (i < alloc_num_workers - 1) {
         // Allocate thread data.
         CHECK_MEM_ERROR(cm, thread_data->td,
                         aom_memalign(32, sizeof(*thread_data->td)));
@@ -135,7 +136,7 @@ void av1_encode_tiles_mt(AV1_COMP *cpi) {
     }
   }
 
-  for (i = 0; i < num_workers; i++) {
+  for (i = 0; i < cpi->num_workers; i++) {
     AVxWorker *const worker = &cpi->workers[i];
     EncWorkerData *thread_data;
 
@@ -160,7 +161,7 @@ void av1_encode_tiles_mt(AV1_COMP *cpi) {
              sizeof(cpi->common.counts));
     }
 
-    if (i < num_workers - 1)
+    if (i < cpi->num_workers - 1)
       thread_data->td->mb.palette_buffer = thread_data->td->palette_buffer;
   }
 

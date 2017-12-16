@@ -12,6 +12,7 @@
 #include <limits.h>
 #include <math.h>
 #include <stdio.h>
+#include <pthread.h>
 
 #include "./av1_rtcd.h"
 #include "./aom_dsp_rtcd.h"
@@ -4611,9 +4612,32 @@ static void rd_pick_partition(const AV1_COMP *const cpi, ThreadData *td,
   }
 }
 
+struct wpp_plan {
+    int row_count;
+    int row_started;
+    int * progress;  // how many cols has each rows processed
+
+    // for controlling progress
+    pthread_mutex_t mtx;
+    pthread_cond_t * conds;
+
+    AV1_COMP *cpi;
+    TileDataEnc *tile_data;
+    TOKENEXTRA **tp;
+
+    // token ptrs for each row, will be merged into tp
+    TOKENEXTRA **tp_row_base;
+    TOKENEXTRA **tp_row;
+
+    // frame context for each row
+    // tokens needs to be modified after encoding to use initial tile_data->tctx
+    FRAME_CONTEXT **tctx_row;
+};
+
 static void encode_rd_sb_row(AV1_COMP *cpi, ThreadData *td,
                              TileDataEnc *tile_data, int mi_row,
-                             TOKENEXTRA **tp) {
+                             TOKENEXTRA **tp,
+                             struct wpp_plan *wpp, int wpp_row) {
   AV1_COMMON *const cm = &cpi->common;
   const TileInfo *const tile_info = &tile_data->tile_info;
   MACROBLOCK *const x = &td->mb;
@@ -4646,6 +4670,20 @@ static void encode_rd_sb_row(AV1_COMP *cpi, ThreadData *td,
   // Code each SB in the row
   for (mi_col = tile_info->mi_col_start; mi_col < tile_info->mi_col_end;
        mi_col += cm->mib_size) {
+
+    // WPP (blahgeek)
+      if (wpp_row != 0) {
+          // check dependency
+          int wait_above = AOMMIN(tile_info->mi_col_end, mi_col + cm->mib_size * 2);
+          printf("WPP: wait %d:%d\n", wpp_row-1, wait_above);
+
+          pthread_mutex_lock(&wpp->mtx);
+          while (wpp->progress[wpp_row-1] < wait_above)
+              pthread_cond_wait(wpp->conds + wpp_row - 1, &wpp->mtx);
+          pthread_mutex_unlock(&wpp->mtx);
+      }
+      printf("WPP: run %d:%d\n", wpp_row, mi_col);
+
     const struct segmentation *const seg = &cm->seg;
     int dummy_rate;
     int64_t dummy_dist;
@@ -4795,7 +4833,139 @@ static void encode_rd_sb_row(AV1_COMP *cpi, ThreadData *td,
                             0, 1, mi_row, mi_col);
     }
 #endif  // CONFIG_LPF_SB
+
+    // WPP (blahgeek)
+    printf("WPP: finish %d:%d\n", wpp_row, mi_col + cm->mib_size);
+    pthread_mutex_lock(&wpp->mtx);
+    wpp->progress[wpp_row] = mi_col + cm->mib_size;
+    pthread_mutex_unlock(&wpp->mtx);
+    pthread_cond_signal(wpp->conds + wpp_row);
+
   }
+
+}
+
+static void wpp_new(struct wpp_plan *wpp,
+        AV1_COMP *cpi, TileDataEnc *tile_data, TOKENEXTRA **tp) {
+  AV1_COMMON *const cm = &cpi->common;
+  const TileInfo *const tile_info = &tile_data->tile_info;
+
+  wpp->row_count = (tile_info->mi_row_end - tile_info->mi_row_start + cm->mib_size - 1) / cm->mib_size;
+  wpp->row_started = 0;
+
+  wpp->cpi = cpi;
+  wpp->tile_data = tile_data;
+  wpp->tp = tp;
+
+  wpp->progress = (int *)malloc(sizeof(int) * wpp->row_count);
+  memset(wpp->progress, 0, sizeof(int) * wpp->row_count);
+
+  pthread_mutex_init(&wpp->mtx, NULL);
+  wpp->conds = (pthread_cond_t *)malloc(sizeof(pthread_cond_t) * wpp->row_count);
+  for (int row = 0 ; row < wpp->row_count ; row += 1)
+      pthread_cond_init(wpp->conds + row, NULL);
+
+  wpp->tp_row_base = (TOKENEXTRA **)malloc(sizeof(TOKENEXTRA *) * wpp->row_count);
+  wpp->tp_row = (TOKENEXTRA **)malloc(sizeof(TOKENEXTRA *) * wpp->row_count);
+  int tokens_per_row = allocated_tokens(*tile_info) / wpp->row_count;
+  for (int row = 0 ; row < wpp->row_count ; row += 1) {
+      wpp->tp_row_base[row] = *tp + tokens_per_row * row;
+      // init to zero so that I can adjust tctx pointers
+      memset(wpp->tp_row_base[row], 0, sizeof(TOKENEXTRA) * tokens_per_row);
+      wpp->tp_row[row] = wpp->tp_row_base[row];
+  }
+
+  wpp->tctx_row = (FRAME_CONTEXT **)malloc(sizeof(FRAME_CONTEXT *) * wpp->row_count);
+
+  // TODO: change different WPP CDF methods here
+#if 0
+  for (int row = 0 ; row < wpp->row_count ; row += 1)
+      wpp->tctx_row[row] = &tile_data->tctx;
+#endif
+  for (int row = 0 ; row < wpp->row_count ; row += 1) {
+      wpp->tctx_row[row] = (FRAME_CONTEXT *)malloc(sizeof(FRAME_CONTEXT));
+      *wpp->tctx_row[row] = tile_data->tctx;
+  }
+}
+
+static void wpp_free(struct wpp_plan *wpp) {
+    free(wpp->progress);
+
+    pthread_mutex_destroy(&wpp->mtx);
+    for (int row = 0 ; row < wpp->row_count ; row += 1)
+        pthread_cond_destroy(wpp->conds + row);
+    free(wpp->conds);
+
+    free(wpp->tp_row_base);
+    free(wpp->tp_row);
+
+    for (int row = 0 ; row < wpp->row_count ; row += 1)
+        if (wpp->tctx_row[row] != &wpp->tile_data->tctx)
+            free(wpp->tctx_row[row]);
+    free(wpp->tctx_row);
+}
+
+static void wpp_run_thread(struct wpp_plan * wpp) {
+
+    AV1_COMMON *const cm = &wpp->cpi->common;
+    TileDataEnc *tile_data = wpp->tile_data;
+    const TileInfo *const tile_info = &tile_data->tile_info;
+
+    while (1) {
+        int row = -1;
+        pthread_mutex_lock(&wpp->mtx);
+        row = wpp->row_started++;
+        pthread_mutex_unlock(&wpp->mtx);
+        if (row >= wpp->row_count)
+            break;
+
+        int mi_row = tile_info->mi_row_start + cm->mib_size * row;
+        // FIXME: WPP thread number must be less than 16
+        ThreadData *td = wpp->cpi->tile_thr_data[row].td;
+        td->mb.e_mbd.tile_ctx = wpp->tctx_row[row];
+        // TODO: what's this?
+        td->mb.m_search_count_ptr = &tile_data->m_search_count;
+        td->mb.ex_search_count_ptr = &tile_data->ex_search_count;
+
+        printf("Running row: %d\n", row);
+        encode_rd_sb_row(wpp->cpi, td, tile_data, mi_row, wpp->tp_row + row,
+                wpp, row);
+    }
+
+}
+
+static void wpp_run(struct wpp_plan *wpp, int max_threads) {
+    pthread_t * ths = (pthread_t *)malloc(sizeof(pthread_t) * max_threads);
+    for (int i = 0 ; i < max_threads ; i += 1)
+        pthread_create(ths+i, NULL, wpp_run_thread, wpp);
+    for (int i = 0 ; i < max_threads ; i += 1)
+        pthread_join(ths[i], NULL);
+    free(ths);
+
+    for (int row = 0 ; row < wpp->row_count ; row += 1) {
+        int token_cnt = wpp->tp_row[row] - wpp->tp_row_base[row];
+        printf("Token count for %d: %d\n", row, token_cnt);
+
+        // change cdf pointer
+        if (wpp->tctx_row[row] != &wpp->tile_data->tctx) {
+            for (TOKENEXTRA * p = wpp->tp_row_base[row]; p != wpp->tp_row[row] ; p++) {
+
+#define CHANGE_CDF(X) do { \
+    if (!(X)) break; \
+    long offset = (char *)(X) - (char *)wpp->tctx_row[row]; \
+    assert(offset >= 0 && offset < sizeof(FRAME_CONTEXT)); \
+    (X) = (char *)(&wpp->tile_data->tctx) + offset; \
+} while(0)
+
+                CHANGE_CDF(p->tail_cdf);
+                CHANGE_CDF(p->head_cdf);
+                CHANGE_CDF(p->color_map_cdf);
+            }
+        }
+
+        memmove(*wpp->tp, wpp->tp_row_base[row], token_cnt * sizeof(TOKENEXTRA));
+        *wpp->tp += token_cnt;
+    }
 }
 
 static void init_encode_frame_mb_context(AV1_COMP *cpi) {
@@ -4949,6 +5119,7 @@ void av1_encode_tile(AV1_COMP *cpi, ThreadData *td, int tile_row,
   av1_zero_above_context(cm, tile_info->mi_col_start, tile_info->mi_col_end);
 #endif
 
+  // TODO (blahgeek) data race in WPP
   // Set up pointers to per thread motion search counters.
   this_tile->m_search_count = 0;   // Count of motion search hits.
   this_tile->ex_search_count = 0;  // Exhaustive mesh search hits.
@@ -5046,10 +5217,25 @@ void av1_encode_tile(AV1_COMP *cpi, ThreadData *td, int tile_row,
 
   av1_crc_calculator_init(&td->mb.tx_rd_record.crc_calculator, 24, 0x5D6DCB);
 
+
+  // WPP (blahgeek)
+  int wpp_threads_n = 8;
+  char * wpp_threads_n_env = getenv("AOM_WPP_THREADS");
+  if (wpp_threads_n_env)
+      wpp_threads_n = atoi(wpp_threads_n_env);
+  printf("WPP: using %d threads\n", wpp_threads_n);
+
+  struct wpp_plan wpp;
+  wpp_new(&wpp, cpi, this_tile, &tok);
+  wpp_run(&wpp, wpp_threads_n);
+  wpp_free(&wpp);
+
+#if 0
   for (mi_row = tile_info->mi_row_start; mi_row < tile_info->mi_row_end;
        mi_row += cm->mib_size) {
     encode_rd_sb_row(cpi, td, this_tile, mi_row, &tok);
   }
+#endif
 
   cpi->tok_count[tile_row][tile_col] =
       (unsigned int)(tok - cpi->tile_tok[tile_row][tile_col]);
@@ -5556,7 +5742,10 @@ static void encode_frame_internal(AV1_COMP *cpi) {
     // TODO(geza.lore): The multi-threaded encoder is not safe with more than
     // 1 tile rows, as it uses the single above_context et al arrays from
     // cpi->common
-    if (AOMMIN(cpi->oxcf.max_threads, cm->tile_cols) > 1 && cm->tile_rows == 1)
+    /* if (AOMMIN(cpi->oxcf.max_threads, cm->tile_cols) > 1 && cm->tile_rows == 1) */
+
+    // blahgeek hack: always use mt
+    if (cm->tile_rows == 1)
       av1_encode_tiles_mt(cpi);
     else
       encode_tiles(cpi);
