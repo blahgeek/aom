@@ -4613,6 +4613,7 @@ static void rd_pick_partition(const AV1_COMP *const cpi, ThreadData *td,
 }
 
 struct wpp_plan {
+    int thread_started; // used by wpp_run_thread to know which thread is it
     int row_count;
     int row_started;
     int * progress;  // how many cols has each rows processed
@@ -4862,6 +4863,7 @@ static void wpp_new(struct wpp_plan *wpp,
   AV1_COMMON *const cm = &cpi->common;
   const TileInfo *const tile_info = &tile_data->tile_info;
 
+  wpp->thread_started = 0;
   wpp->row_count = (tile_info->mi_row_end - tile_info->mi_row_start + cm->mib_size - 1) / cm->mib_size;
   wpp->row_started = 0;
 
@@ -4960,6 +4962,18 @@ static void wpp_run_thread(struct wpp_plan * wpp) {
     TileDataEnc *tile_data = wpp->tile_data;
     const TileInfo *const tile_info = &tile_data->tile_info;
 
+    int nth = -1;
+    pthread_mutex_lock(&wpp->mtx);
+    nth = wpp->thread_started++;
+    pthread_mutex_unlock(&wpp->mtx);
+
+    // FIXME: WPP thread number must be less than 16
+    ThreadData *td = wpp->cpi->tile_thr_data[nth].td;
+    // TODO: what's this?
+    td->mb.m_search_count_ptr = &tile_data->m_search_count;
+    td->mb.ex_search_count_ptr = &tile_data->ex_search_count;
+    av1_crc_calculator_init(&td->mb.tx_rd_record.crc_calculator, 24, 0x5D6DCB);
+
     while (1) {
         int row = -1;
         pthread_mutex_lock(&wpp->mtx);
@@ -4969,13 +4983,7 @@ static void wpp_run_thread(struct wpp_plan * wpp) {
             break;
 
         int mi_row = tile_info->mi_row_start + cm->mib_size * row;
-        // FIXME: WPP thread number must be less than 16
-        ThreadData *td = wpp->cpi->tile_thr_data[row].td;
         td->mb.e_mbd.tile_ctx = wpp->tctx_row[row];
-        // TODO: what's this?
-        td->mb.m_search_count_ptr = &tile_data->m_search_count;
-        td->mb.ex_search_count_ptr = &tile_data->ex_search_count;
-        av1_crc_calculator_init(&td->mb.tx_rd_record.crc_calculator, 24, 0x5D6DCB);
 
         printf("Running row: %d\n", row);
         encode_rd_sb_row(wpp->cpi, td, tile_data, mi_row, wpp->tp_row + row,
