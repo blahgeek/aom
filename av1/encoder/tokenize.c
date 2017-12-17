@@ -307,7 +307,7 @@ static INLINE void add_token(TOKENEXTRA **t,
                              aom_cdf_prob (*tail_cdf)[CDF_SIZE(ENTROPY_TOKENS)],
                              aom_cdf_prob (*head_cdf)[CDF_SIZE(ENTROPY_TOKENS)],
                              int eob_val, int first_val, int32_t extra,
-                             uint8_t token) {
+                             uint8_t token, void **ew_ctxs) {
   (*t)->token = token;
   (*t)->extra = extra;
   (*t)->tail_cdf = tail_cdf;
@@ -317,14 +317,14 @@ static INLINE void add_token(TOKENEXTRA **t,
   (*t)++;
 
   if (token == BLOCK_Z_TOKEN) {
-    update_cdf(*head_cdf, 0, HEAD_TOKENS + 1);
+    update_cdf(*head_cdf, 0, HEAD_TOKENS + 1, ew_ctxs);
   } else {
     if (eob_val != LAST_EOB) {
       const int symb = 2 * AOMMIN(token, TWO_TOKEN) - eob_val + first_val;
-      update_cdf(*head_cdf, symb, HEAD_TOKENS + first_val);
+      update_cdf(*head_cdf, symb, HEAD_TOKENS + first_val, ew_ctxs);
     }
     if (token > ONE_TOKEN)
-      update_cdf(*tail_cdf, token - TWO_TOKEN, TAIL_TOKENS);
+      update_cdf(*tail_cdf, token - TWO_TOKEN, TAIL_TOKENS, ew_ctxs);
   }
 }
 #endif  // !CONFIG_PVQ || CONFIG_VAR_TX
@@ -546,7 +546,7 @@ static void tokenize_b(int plane, int block, int blk_row, int blk_col,
 
   if (eob == 0)
     add_token(&t, &coef_tail_cdfs[band[c]][pt], &coef_head_cdfs[band[c]][pt], 1,
-              1, 0, BLOCK_Z_TOKEN);
+              1, 0, BLOCK_Z_TOKEN, ec_ctx->ew_ctxs);
 
   while (c < eob) {
     int v = qcoeff[scan[c]];
@@ -554,14 +554,14 @@ static void tokenize_b(int plane, int block, int blk_row, int blk_col,
 
     if (!v) {
       add_token(&t, &coef_tail_cdfs[band[c]][pt], &coef_head_cdfs[band[c]][pt],
-                0, first_val, 0, ZERO_TOKEN);
+                0, first_val, 0, ZERO_TOKEN, ec_ctx->ew_ctxs);
       token_cache[scan[c]] = 0;
     } else {
       eob_val =
           (c + 1 == eob) ? (c + 1 == seg_eob ? LAST_EOB : EARLY_EOB) : NO_EOB;
       av1_get_token_extra(v, &token, &extra);
       add_token(&t, &coef_tail_cdfs[band[c]][pt], &coef_head_cdfs[band[c]][pt],
-                eob_val, first_val, extra, (uint8_t)token);
+                eob_val, first_val, extra, (uint8_t)token, ec_ctx->ew_ctxs);
       token_cache[scan[c]] = av1_pt_energy_class[token];
     }
     ++c;

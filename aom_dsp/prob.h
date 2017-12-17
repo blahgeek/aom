@@ -156,7 +156,7 @@ static INLINE void av1_tree_to_cdf(const aom_tree_index *tree,
 
 void av1_indices_from_tree(int *ind, int *inv, const aom_tree_index *tree);
 
-static INLINE void update_cdf(aom_cdf_prob *cdf, int val, int nsymbs) {
+static INLINE void update_cdf(aom_cdf_prob *cdf, int val, int nsymbs, void **ew_ctxs) {
 
   // blahgeek: spinlock on cdf[nsymbs], lock value: 0xffffffff
   aom_cdf_prob const lockval = (aom_cdf_prob)0xffffffffU;
@@ -202,11 +202,17 @@ static INLINE void update_cdf(aom_cdf_prob *cdf, int val, int nsymbs) {
 
   __sync_synchronize();
   cdf[nsymbs] = cdf_count;
+
+  if (ew_ctxs && ew_ctxs[1]) {
+      long offset = (char *)cdf - (char *)ew_ctxs[0];
+      aom_cdf_prob * next_cdf = (char *)ew_ctxs[1] + offset;
+      update_cdf(next_cdf, val, nsymbs, ew_ctxs+1);
+  }
 }
 
 #if CONFIG_LV_MAP
-static INLINE void update_bin(aom_cdf_prob *cdf, int val, int nsymbs) {
-  update_cdf(cdf, val, nsymbs);
+static INLINE void update_bin(aom_cdf_prob *cdf, int val, int nsymbs, void **ew_ctxs) {
+  update_cdf(cdf, val, nsymbs, ew_ctxs);
 }
 #endif
 

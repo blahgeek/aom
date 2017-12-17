@@ -481,7 +481,7 @@ static void update_filter_type_count(FRAME_COUNTS *counts,
           av1_extract_interp_filter(mbmi->interp_filters, dir);
       ++counts->switchable_interp[ctx][filter];
       update_cdf(xd->tile_ctx->switchable_interp_cdf[ctx], filter,
-                 SWITCHABLE_FILTERS);
+                 SWITCHABLE_FILTERS, xd->tile_ctx->ew_ctxs);
     }
   }
 }
@@ -1657,7 +1657,7 @@ static void update_stats(const AV1_COMMON *const cm, ThreadData *td, int mi_row,
         counts->intra_inter[av1_get_intra_inter_context(xd)][inter_block]++;
 #if CONFIG_NEW_MULTISYMBOL
       update_cdf(fc->intra_inter_cdf[av1_get_intra_inter_context(xd)],
-                 inter_block, 2);
+                 inter_block, 2, fc->ew_ctxs);
 #endif
       // If the segment reference feature is enabled we have only a single
       // reference frame allowed for the segment so exclude it from
@@ -1680,7 +1680,7 @@ static void update_stats(const AV1_COMMON *const cm, ThreadData *td, int mi_row,
                               [has_second_ref(mbmi)]++;
 #if CONFIG_NEW_MULTISYMBOL
             update_cdf(av1_get_reference_mode_cdf(cm, xd), has_second_ref(mbmi),
-                       2);
+                       2, xd->tile_ctx->ew_ctxs);
 #endif  // CONFIG_NEW_MULTISYMBOL
           }
         }
@@ -1786,22 +1786,22 @@ static void update_stats(const AV1_COMMON *const cm, ThreadData *td, int mi_row,
           if (mbmi->ref_frame[1] == INTRA_FRAME) {
             counts->interintra[bsize_group][1]++;
 #if CONFIG_NEW_MULTISYMBOL
-            update_cdf(fc->interintra_cdf[bsize_group], 1, 2);
+            update_cdf(fc->interintra_cdf[bsize_group], 1, 2, fc->ew_ctxs);
 #endif
             counts->interintra_mode[bsize_group][mbmi->interintra_mode]++;
             update_cdf(fc->interintra_mode_cdf[bsize_group],
-                       mbmi->interintra_mode, INTERINTRA_MODES);
+                       mbmi->interintra_mode, INTERINTRA_MODES, fc->ew_ctxs);
             if (is_interintra_wedge_used(bsize)) {
               counts->wedge_interintra[bsize][mbmi->use_wedge_interintra]++;
 #if CONFIG_NEW_MULTISYMBOL
               update_cdf(fc->wedge_interintra_cdf[bsize],
-                         mbmi->use_wedge_interintra, 2);
+                         mbmi->use_wedge_interintra, 2, fc->ew_ctxs);
 #endif
             }
           } else {
             counts->interintra[bsize_group][0]++;
 #if CONFIG_NEW_MULTISYMBOL
-            update_cdf(fc->interintra_cdf[bsize_group], 0, 2);
+            update_cdf(fc->interintra_cdf[bsize_group], 0, 2, fc->ew_ctxs);
 #endif
           }
         }
@@ -1828,22 +1828,22 @@ static void update_stats(const AV1_COMMON *const cm, ThreadData *td, int mi_row,
             if (motion_allowed == WARPED_CAUSAL) {
               counts->motion_mode[mbmi->sb_type][mbmi->motion_mode]++;
               update_cdf(fc->motion_mode_cdf[mbmi->sb_type], mbmi->motion_mode,
-                         MOTION_MODES);
+                         MOTION_MODES, fc->ew_ctxs);
 #if CONFIG_NCOBMC_ADAPT_WEIGHT
             } else if (motion_allowed == NCOBMC_ADAPT_WEIGHT) {
               counts->ncobmc[mbmi->sb_type][mbmi->motion_mode]++;
               update_cdf(fc->ncobmc_cdf[mbmi->sb_type], mbmi->motion_mode,
-                         OBMC_FAMILY_MODES);
+                         OBMC_FAMILY_MODES, fc->ew_ctxs);
             } else if (motion_allowed == OBMC_CAUSAL) {
               counts->obmc[mbmi->sb_type][mbmi->motion_mode == OBMC_CAUSAL]++;
-              update_cdf(fc->obmc_cdf[mbmi->sb_type], mbmi->motion_mode, 2);
+              update_cdf(fc->obmc_cdf[mbmi->sb_type], mbmi->motion_mode, 2, fc->ew_ctxs);
             }
 #else
             } else if (motion_allowed == OBMC_CAUSAL) {
               counts->obmc[mbmi->sb_type][mbmi->motion_mode == OBMC_CAUSAL]++;
 #if CONFIG_NEW_MULTISYMBOL
               update_cdf(fc->obmc_cdf[mbmi->sb_type],
-                         mbmi->motion_mode == OBMC_CAUSAL, 2);
+                         mbmi->motion_mode == OBMC_CAUSAL, 2, fc->ew_ctxs);
 #endif
             }
 #endif  // CONFIG_NCOBMC_ADAPT_WEIGHT
@@ -1852,7 +1852,7 @@ static void update_stats(const AV1_COMMON *const cm, ThreadData *td, int mi_row,
           if (motion_allowed > SIMPLE_TRANSLATION) {
             counts->motion_mode[mbmi->sb_type][mbmi->motion_mode]++;
             update_cdf(fc->motion_mode_cdf[mbmi->sb_type], mbmi->motion_mode,
-                       MOTION_MODES);
+                       MOTION_MODES, fc->ew_ctxs);
           }
 #endif  // CONFIG_MOTION_VAR && CONFIG_WARPED_MOTION
 
@@ -1862,11 +1862,11 @@ static void update_stats(const AV1_COMMON *const cm, ThreadData *td, int mi_row,
               adapt_overlap_block_lookup[mbmi->sb_type];
           ++counts->ncobmc_mode[ao_block][mbmi->ncobmc_mode[0]];
           update_cdf(fc->ncobmc_mode_cdf[ao_block], mbmi->ncobmc_mode[0],
-                     MAX_NCOBMC_MODES);
+                     MAX_NCOBMC_MODES, fc->ew_ctxs);
           if (mi_size_wide[mbmi->sb_type] != mi_size_high[mbmi->sb_type]) {
             ++counts->ncobmc_mode[ao_block][mbmi->ncobmc_mode[1]];
             update_cdf(fc->ncobmc_mode_cdf[ao_block], mbmi->ncobmc_mode[1],
-                       MAX_NCOBMC_MODES);
+                       MAX_NCOBMC_MODES, fc->ew_ctxs);
           }
         }
 #endif
@@ -1891,7 +1891,7 @@ static void update_stats(const AV1_COMMON *const cm, ThreadData *td, int mi_row,
             counts
                 ->compound_interinter[bsize][mbmi->interinter_compound_type]++;
             update_cdf(fc->compound_type_cdf[bsize],
-                       mbmi->interinter_compound_type, COMPOUND_TYPES);
+                       mbmi->interinter_compound_type, COMPOUND_TYPES, fc->ew_ctxs);
 #if CONFIG_WEDGE && CONFIG_COMPOUND_SEGMENT
           }
 #endif
@@ -1908,7 +1908,7 @@ static void update_stats(const AV1_COMMON *const cm, ThreadData *td, int mi_row,
         mode_ctx = mbmi_ext->compound_mode_context[mbmi->ref_frame[0]];
         ++counts->inter_compound_mode[mode_ctx][INTER_COMPOUND_OFFSET(mode)];
         update_cdf(fc->inter_compound_mode_cdf[mode_ctx],
-                   INTER_COMPOUND_OFFSET(mode), INTER_COMPOUND_MODES);
+                   INTER_COMPOUND_OFFSET(mode), INTER_COMPOUND_MODES, fc->ew_ctxs);
 #if CONFIG_COMPOUND_SINGLEREF
       } else if (is_inter_singleref_comp_mode(mode)) {
         mode_ctx = mbmi_ext->compound_mode_context[mbmi->ref_frame[0]];
@@ -4633,6 +4633,7 @@ struct wpp_plan {
     // tokens needs to be modified after encoding to use initial tile_data->tctx
     FRAME_CONTEXT **tctx_row;
     int use_wavefront_tctx;
+    FRAME_CONTEXT ***ew_tctxs_row; // extended wavefront cdf transfer
 };
 
 static void encode_rd_sb_row(AV1_COMP *cpi, ThreadData *td,
@@ -4889,6 +4890,10 @@ static void wpp_new(struct wpp_plan *wpp,
   wpp->tctx_row = (FRAME_CONTEXT **)malloc(sizeof(FRAME_CONTEXT *) * wpp->row_count);
   wpp->use_wavefront_tctx = 0;
 
+  wpp->ew_tctxs_row = (FRAME_CONTEXT ***)malloc(sizeof(FRAME_CONTEXT **) * wpp->row_count);
+  memset(wpp->ew_tctxs_row, 0, sizeof(FRAME_CONTEXT **) * wpp->row_count);
+  tile_data->tctx.ew_ctxs = NULL;
+
   char * wpp_cdf_mode = getenv("AOM_WPP_CDF_MODE");
   if (wpp_cdf_mode && strcmp(wpp_cdf_mode, "copy") == 0) {
       printf("Using WPP CDF Mode: Copy\n");
@@ -4904,6 +4909,22 @@ static void wpp_new(struct wpp_plan *wpp,
           wpp->tctx_row[row] = (FRAME_CONTEXT *)malloc(sizeof(FRAME_CONTEXT));
       *wpp->tctx_row[0] = tile_data->tctx;
       // only copy the first one, wait for each row to copy in encode_rd_sb_row
+  }
+  else if (wpp_cdf_mode && strcmp(wpp_cdf_mode, "extended") == 0) {
+      printf("Using WPP CDF Mode: Extended Wavefront\n");
+      // starts like copy mode
+      for (int row = 0 ; row < wpp->row_count ; row += 1) {
+          wpp->tctx_row[row] = (FRAME_CONTEXT *)malloc(sizeof(FRAME_CONTEXT));
+          *wpp->tctx_row[row] = tile_data->tctx;
+      }
+      // but each row would updates CDFs for all rows under it
+      for (int row = 0 ; row < wpp->row_count ; row += 1) {
+          wpp->ew_tctxs_row[row] = (FRAME_CONTEXT **)malloc(sizeof(FRAME_CONTEXT *) * wpp->row_count);
+          memset(wpp->ew_tctxs_row[row], 0, sizeof(FRAME_CONTEXT *) * wpp->row_count);
+          for (int x = row ; x < wpp->row_count ; x += 1)
+              wpp->ew_tctxs_row[row][x - row] = wpp->tctx_row[x];
+          wpp->tctx_row[row]->ew_ctxs = wpp->ew_tctxs_row[row];
+      }
   }
   else {
       printf("Using WPP CDF Mode: Naive\n"); // TODO: add spinlock to each cdf?
@@ -4927,6 +4948,10 @@ static void wpp_free(struct wpp_plan *wpp) {
         if (wpp->tctx_row[row] != &wpp->tile_data->tctx)
             free(wpp->tctx_row[row]);
     free(wpp->tctx_row);
+
+    for (int row = 0 ; row < wpp->row_count ; row += 1)
+        free(wpp->ew_tctxs_row[row]);
+    free(wpp->ew_tctxs_row);
 }
 
 static void wpp_run_thread(struct wpp_plan * wpp) {
@@ -6160,12 +6185,12 @@ static void sum_intra_stats(FRAME_COUNTS *counts, MACROBLOCKD *xd,
           ++counts->kf_y_mode[a][l][bmode];
 #endif  // CONFIG_ENTROPY_STATS
           update_cdf(get_y_mode_cdf(fc, mi, above_mi, left_mi, bidx), bmode,
-                     INTRA_MODES);
+                     INTRA_MODES, fc->ew_ctxs);
         } else {
 #if CONFIG_ENTROPY_STATS
           ++counts->y_mode[0][bmode];
 #endif  // CONFIG_ENTROPY_STATS
-          update_cdf(fc->y_mode_cdf[0], bmode, INTRA_MODES);
+          update_cdf(fc->y_mode_cdf[0], bmode, INTRA_MODES, fc->ew_ctxs);
         }
       }
   } else {
@@ -6176,12 +6201,12 @@ static void sum_intra_stats(FRAME_COUNTS *counts, MACROBLOCKD *xd,
       ++counts->kf_y_mode[above][left][y_mode];
 #endif  // CONFIG_ENTROPY_STATS
       update_cdf(get_y_mode_cdf(fc, mi, above_mi, left_mi, 0), y_mode,
-                 INTRA_MODES);
+                 INTRA_MODES, fc->ew_ctxs);
     } else {
 #if CONFIG_ENTROPY_STATS
       ++counts->y_mode[size_group_lookup[bsize]][y_mode];
 #endif  // CONFIG_ENTROPY_STATS
-      update_cdf(fc->y_mode_cdf[size_group_lookup[bsize]], y_mode, INTRA_MODES);
+      update_cdf(fc->y_mode_cdf[size_group_lookup[bsize]], y_mode, INTRA_MODES, fc->ew_ctxs);
     }
 
 #if CONFIG_FILTER_INTRA
@@ -6229,7 +6254,7 @@ static void sum_intra_stats(FRAME_COUNTS *counts, MACROBLOCKD *xd,
 #if CONFIG_ENTROPY_STATS
   ++counts->uv_mode[y_mode][uv_mode];
 #endif  // CONFIG_ENTROPY_STATS
-  update_cdf(fc->uv_mode_cdf[y_mode], uv_mode, UV_INTRA_MODES);
+  update_cdf(fc->uv_mode_cdf[y_mode], uv_mode, UV_INTRA_MODES, fc->ew_ctxs);
 }
 
 #if CONFIG_VAR_TX
@@ -6427,7 +6452,7 @@ void av1_update_tx_type_count(const AV1_COMMON *cm, MACROBLOCKD *xd,
       if (is_inter) {
         update_cdf(fc->inter_ext_tx_cdf[eset][txsize_sqr_map[tx_size]],
                    av1_ext_tx_ind[tx_set_type][tx_type],
-                   av1_num_ext_tx_set[tx_set_type]);
+                   av1_num_ext_tx_set[tx_set_type], fc->ew_ctxs);
 #if CONFIG_ENTROPY_STATS
         ++counts->inter_ext_tx[eset][txsize_sqr_map[tx_size]][tx_type];
 #endif  // CONFIG_ENTROPY_STATS
@@ -6439,7 +6464,7 @@ void av1_update_tx_type_count(const AV1_COMMON *cm, MACROBLOCKD *xd,
         update_cdf(
             fc->intra_ext_tx_cdf[eset][txsize_sqr_map[tx_size]][mbmi->mode],
             av1_ext_tx_ind[tx_set_type][tx_type],
-            av1_num_ext_tx_set[tx_set_type]);
+            av1_num_ext_tx_set[tx_set_type], fc->ew_ctxs);
       }
 #else
       (void)tx_type;
@@ -6493,7 +6518,7 @@ void av1_update_tx_type_count(const AV1_COMMON *cm, MACROBLOCKD *xd,
       ++counts->inter_ext_tx[tx_size][tx_type];
 #endif  // CONFIG_ENTROPY_STATS
       update_cdf(fc->inter_ext_tx_cdf[tx_size], av1_ext_tx_ind[tx_type],
-                 TX_TYPES);
+                 TX_TYPES, fc->ew_ctxs);
     } else {
 #if CONFIG_ENTROPY_STATS
       ++counts->intra_ext_tx[tx_size][intra_mode_to_tx_type_context[mbmi->mode]]
@@ -6502,7 +6527,7 @@ void av1_update_tx_type_count(const AV1_COMMON *cm, MACROBLOCKD *xd,
       update_cdf(
           fc->intra_ext_tx_cdf[tx_size]
                               [intra_mode_to_tx_type_context[mbmi->mode]],
-          av1_ext_tx_ind[tx_type], TX_TYPES);
+          av1_ext_tx_ind[tx_type], TX_TYPES, fc->ew_ctxs);
     }
   }
 #endif  // CONFIG_EXT_TX

@@ -414,6 +414,9 @@ typedef struct frame_contexts {
   aom_cdf_prob lpf_delta_cdf[LPF_DELTA_CONTEXT][CDF_SIZE(DELTA_RANGE)];
   aom_cdf_prob lpf_sign_cdf[LPF_REUSE_CONTEXT][LPF_SIGN_CONTEXT][CDF_SIZE(2)];
 #endif  // CONFIG_LPF_SB
+
+  void **ew_ctxs; // by blahgeek
+
 } FRAME_CONTEXT;
 
 typedef struct FRAME_COUNTS {
