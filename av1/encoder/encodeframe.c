@@ -4632,6 +4632,7 @@ struct wpp_plan {
     // frame context for each row
     // tokens needs to be modified after encoding to use initial tile_data->tctx
     FRAME_CONTEXT **tctx_row;
+    int use_wavefront_tctx;
 };
 
 static void encode_rd_sb_row(AV1_COMP *cpi, ThreadData *td,
@@ -4839,6 +4840,16 @@ static void encode_rd_sb_row(AV1_COMP *cpi, ThreadData *td,
     pthread_mutex_lock(&wpp->mtx);
     wpp->progress[wpp_row] = mi_col + cm->mib_size;
     pthread_mutex_unlock(&wpp->mtx);
+
+    if (wpp->use_wavefront_tctx && wpp_row + 1 < wpp->row_count) {
+        if (mi_col + cm->mib_size == cm->mib_size * 2 ||
+                mi_col + cm->mib_size == tile_info->mi_col_end) {
+            // next row first ready
+            *wpp->tctx_row[wpp_row + 1] = *wpp->tctx_row[wpp_row]; // copy from me
+            printf("WPP: tctx copied to row %d\n", wpp_row + 1);
+        }
+    }
+
     pthread_cond_signal(wpp->conds + wpp_row);
 
   }
@@ -4876,15 +4887,28 @@ static void wpp_new(struct wpp_plan *wpp,
   }
 
   wpp->tctx_row = (FRAME_CONTEXT **)malloc(sizeof(FRAME_CONTEXT *) * wpp->row_count);
+  wpp->use_wavefront_tctx = 0;
 
-  // TODO: change different WPP CDF methods here
-#if 0
-  for (int row = 0 ; row < wpp->row_count ; row += 1)
-      wpp->tctx_row[row] = &tile_data->tctx;
-#endif
-  for (int row = 0 ; row < wpp->row_count ; row += 1) {
-      wpp->tctx_row[row] = (FRAME_CONTEXT *)malloc(sizeof(FRAME_CONTEXT));
-      *wpp->tctx_row[row] = tile_data->tctx;
+  char * wpp_cdf_mode = getenv("AOM_WPP_CDF_MODE");
+  if (wpp_cdf_mode && strcmp(wpp_cdf_mode, "copy") == 0) {
+      printf("Using WPP CDF Mode: Copy\n");
+      for (int row = 0 ; row < wpp->row_count ; row += 1) {
+          wpp->tctx_row[row] = (FRAME_CONTEXT *)malloc(sizeof(FRAME_CONTEXT));
+          *wpp->tctx_row[row] = tile_data->tctx;
+      }
+  }
+  else if (wpp_cdf_mode && strcmp(wpp_cdf_mode, "wavefront") == 0) {
+      printf("Using WPP CDF Mode: Wavefront\n");
+      wpp->use_wavefront_tctx = 1;
+      for (int row = 0 ; row < wpp->row_count ; row += 1)
+          wpp->tctx_row[row] = (FRAME_CONTEXT *)malloc(sizeof(FRAME_CONTEXT));
+      *wpp->tctx_row[0] = tile_data->tctx;
+      // only copy the first one, wait for each row to copy in encode_rd_sb_row
+  }
+  else {
+      printf("Using WPP CDF Mode: Naive\n"); // TODO: add spinlock to each cdf?
+      for (int row = 0 ; row < wpp->row_count ; row += 1)
+          wpp->tctx_row[row] = &tile_data->tctx;
   }
 }
 
