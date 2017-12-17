@@ -4975,6 +4975,7 @@ static void wpp_run_thread(struct wpp_plan * wpp) {
         // TODO: what's this?
         td->mb.m_search_count_ptr = &tile_data->m_search_count;
         td->mb.ex_search_count_ptr = &tile_data->ex_search_count;
+        av1_crc_calculator_init(&td->mb.tx_rd_record.crc_calculator, 24, 0x5D6DCB);
 
         printf("Running row: %d\n", row);
         encode_rd_sb_row(wpp->cpi, td, tile_data, mi_row, wpp->tp_row + row,
@@ -5172,8 +5173,9 @@ void av1_encode_tile(AV1_COMP *cpi, ThreadData *td, int tile_row,
   // Set up pointers to per thread motion search counters.
   this_tile->m_search_count = 0;   // Count of motion search hits.
   this_tile->ex_search_count = 0;  // Exhaustive mesh search hits.
-  td->mb.m_search_count_ptr = &this_tile->m_search_count;
-  td->mb.ex_search_count_ptr = &this_tile->ex_search_count;
+  // moved to WPP run
+  /* td->mb.m_search_count_ptr = &this_tile->m_search_count; */
+  /* td->mb.ex_search_count_ptr = &this_tile->ex_search_count; */
 
 #if CONFIG_PVQ
   td->mb.pvq_q = &this_tile->pvq_q;
@@ -5247,7 +5249,8 @@ void av1_encode_tile(AV1_COMP *cpi, ThreadData *td, int tile_row,
 #endif  // #if CONFIG_PVQ
 
   this_tile->tctx = *cm->fc;
-  td->mb.e_mbd.tile_ctx = &this_tile->tctx;
+  // moved to WPP run
+  /* td->mb.e_mbd.tile_ctx = &this_tile->tctx; */
 
 #if CONFIG_CFL
   MACROBLOCKD *const xd = &td->mb.e_mbd;
@@ -5264,7 +5267,8 @@ void av1_encode_tile(AV1_COMP *cpi, ThreadData *td, int tile_row,
     av1_setup_across_tile_boundary_info(cm, tile_info);
 #endif
 
-  av1_crc_calculator_init(&td->mb.tx_rd_record.crc_calculator, 24, 0x5D6DCB);
+  // moved to WPP run
+  /* av1_crc_calculator_init(&td->mb.tx_rd_record.crc_calculator, 24, 0x5D6DCB); */
 
 
   // WPP (blahgeek)
