@@ -157,10 +157,16 @@ static INLINE void av1_tree_to_cdf(const aom_tree_index *tree,
 void av1_indices_from_tree(int *ind, int *inv, const aom_tree_index *tree);
 
 static INLINE void update_cdf(aom_cdf_prob *cdf, int val, int nsymbs) {
-  int rate = 4 + (cdf[nsymbs] > 31) + get_msb(nsymbs);
+
+  // blahgeek: spinlock on cdf[nsymbs], lock value: 0xffffffff
+  aom_cdf_prob const lockval = (aom_cdf_prob)0xffffffffU;
+  aom_cdf_prob cdf_count; // = cdf[nsymbs]
+  while ((cdf_count = __sync_fetch_and_or(cdf + nsymbs, lockval)) == lockval) ;
+
+  int rate = 4 + (cdf_count > 31) + get_msb(nsymbs);
 #if CONFIG_LV_MAP
   if (nsymbs == 2)
-    rate = 4 + (cdf[nsymbs] > 7) + (cdf[nsymbs] > 15) + get_msb(nsymbs);
+    rate = 4 + (cdf_count > 7) + (cdf_count > 15) + get_msb(nsymbs);
 #endif
   const int rate2 = 5;
   int i, tmp;
@@ -192,7 +198,10 @@ static INLINE void update_cdf(aom_cdf_prob *cdf, int val, int nsymbs) {
     cdf[i] += diff;
   }
 #endif
-  cdf[nsymbs] += (cdf[nsymbs] < 32);
+  cdf_count += (cdf_count < 32);
+
+  __sync_synchronize();
+  cdf[nsymbs] = cdf_count;
 }
 
 #if CONFIG_LV_MAP
