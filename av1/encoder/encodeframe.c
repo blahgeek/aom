@@ -4921,8 +4921,8 @@ static void wpp_new(struct wpp_plan *wpp,
       }
       // but each row would updates CDFs for all rows under it
       for (int row = 0 ; row < wpp->row_count ; row += 1) {
-          wpp->ew_tctxs_row[row] = (FRAME_CONTEXT **)malloc(sizeof(FRAME_CONTEXT *) * wpp->row_count);
-          memset(wpp->ew_tctxs_row[row], 0, sizeof(FRAME_CONTEXT *) * wpp->row_count);
+          wpp->ew_tctxs_row[row] = (FRAME_CONTEXT **)malloc(sizeof(FRAME_CONTEXT *) * (wpp->row_count + 1));
+          memset(wpp->ew_tctxs_row[row], 0, sizeof(FRAME_CONTEXT *) * (wpp->row_count + 1));
           for (int x = row ; x < wpp->row_count ; x += 1)
               wpp->ew_tctxs_row[row][x - row] = wpp->tctx_row[x];
           wpp->tctx_row[row]->ew_ctxs = wpp->ew_tctxs_row[row];
