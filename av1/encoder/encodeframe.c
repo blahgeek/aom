@@ -4617,6 +4617,7 @@ struct wpp_plan {
     int row_count;
     int row_started;
     int * progress;  // how many cols has each rows processed
+    int tile_thread_id;
 
     // for controlling progress
     pthread_mutex_t mtx;
@@ -4859,13 +4860,17 @@ static void encode_rd_sb_row(AV1_COMP *cpi, ThreadData *td,
 }
 
 static void wpp_new(struct wpp_plan *wpp,
-        AV1_COMP *cpi, TileDataEnc *tile_data, TOKENEXTRA **tp) {
+        AV1_COMP *cpi, TileDataEnc *tile_data, TOKENEXTRA **tp, ThreadData *base_td) {
   AV1_COMMON *const cm = &cpi->common;
   const TileInfo *const tile_info = &tile_data->tile_info;
 
   wpp->thread_started = 0;
   wpp->row_count = (tile_info->mi_row_end - tile_info->mi_row_start + cm->mib_size - 1) / cm->mib_size;
   wpp->row_started = 0;
+
+  wpp->tile_thread_id = 0;
+  while (cpi->tile_thr_data[wpp->tile_thread_id].td != base_td)
+    wpp->tile_thread_id ++;
 
   wpp->cpi = cpi;
   wpp->tile_data = tile_data;
@@ -4967,8 +4972,10 @@ static void wpp_run_thread(struct wpp_plan * wpp) {
     nth = wpp->thread_started++;
     pthread_mutex_unlock(&wpp->mtx);
 
-    // FIXME: WPP thread number must be less than 16
-    ThreadData *td = wpp->cpi->tile_thr_data[nth].td;
+    printf("WPP: thread %d (tile %d), use thread data #%d\n",
+        nth, wpp->tile_thread_id, wpp->tile_thread_id + wpp->cpi->num_workers * nth);
+    ThreadData *td = wpp->cpi->tile_thr_data[wpp->tile_thread_id + wpp->cpi->num_workers * nth].td;
+
     // TODO: what's this?
     td->mb.m_search_count_ptr = &tile_data->m_search_count;
     td->mb.ex_search_count_ptr = &tile_data->ex_search_count;
@@ -5280,14 +5287,14 @@ void av1_encode_tile(AV1_COMP *cpi, ThreadData *td, int tile_row,
 
 
   // WPP (blahgeek)
-  int wpp_threads_n = 8;
+  int wpp_threads_n = 1;
   char * wpp_threads_n_env = getenv("AOM_WPP_THREADS");
   if (wpp_threads_n_env)
       wpp_threads_n = atoi(wpp_threads_n_env);
   printf("WPP: using %d threads\n", wpp_threads_n);
 
   struct wpp_plan wpp;
-  wpp_new(&wpp, cpi, this_tile, &tok);
+  wpp_new(&wpp, cpi, this_tile, &tok, td);
   wpp_run(&wpp, wpp_threads_n);
   wpp_free(&wpp);
 

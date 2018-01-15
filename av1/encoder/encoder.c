@@ -3207,7 +3207,7 @@ void av1_remove_compressor(AV1_COMP *cpi) {
     aom_get_worker_interface()->end(worker);
 
     // Deallocate allocated thread data.
-    if (t < cpi->num_workers - 1) {
+    if (t != 0) {
       aom_free(thread_data->td->palette_buffer);
 #if CONFIG_MOTION_VAR
       aom_free(thread_data->td->above_pred_buf);
