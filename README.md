@@ -1,3 +1,9 @@
+## How to run WPP
+
+`env AOM_WPP_CDF_MODE=[copy|wavefront|extended|naive] AOM_WPP_THREADS=8 ./aomenc ...`
+
+---
+
 # AV1 Codec Library
 
 ## Building the library and applications
